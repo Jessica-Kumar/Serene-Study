@@ -1,0 +1,51 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+
+# Environments
+.env
+.venv
+env/
+venv/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# mypy / pytype
+.mypy_cache/
+.pyre/
+.pytype/
+
+# ============================================================
+# PROJECT-SPECIFIC: Exam Mental Health Detector
+# ============================================================
+
+# Streamlit secrets — NEVER commit API keys!
+.streamlit/secrets.toml
+
+# Firebase service account key
+firebase_key.json
+
+# Trained BERT model directory (large ~270MB — use HuggingFace Hub for production)
+bert_anxiety_model/
+results/
+logs/
+
+# Saved sklearn/joblib models
+*.sav
+*.joblib
+
+# Generated datasets (can be recreated by running data_preprocessing.py)
+anxiety_text_dataset.csv
+exam_anxiety_dataset.csv
+Mental_health_dset.csv
+
+# Large legacy files
+Disorder.joblib
