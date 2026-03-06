@@ -285,27 +285,43 @@ with tab2:
     st.header("🏫 Academic Wellness Monitoring")
     st.markdown("Track aggregated, anonymized student anxiety trends to support timely counseling and institutional action.")
 
-    # Auto-load on tab open
-    if 'dashboard_history' not in st.session_state:
+    def load_dashboard_data():
+        """Load history from Firebase (persistent) with fallback to backend /history."""
+        try:
+            db = fb.get_db()
+            if db:
+                docs = db.collection(fb.COLLECTION_NAME if hasattr(fb, 'COLLECTION_NAME') else 'exam_results').stream()
+                records = []
+                for i, doc in enumerate(docs):
+                    d = doc.to_dict()
+                    level = d.get('anxiety_level', 'Low')
+                    level_to_int = {'Low': 0, 'Moderate': 1, 'High': 2}
+                    records.append({
+                        "id": i + 1,
+                        "timestamp": str(d.get('timestamp', '')),
+                        "anxiety_level": level_to_int.get(level, 0) if isinstance(level, str) else level
+                    })
+                return records
+        except Exception as e:
+            print(f"Firebase read error: {e}")
+        # Fallback to backend /history
         try:
             resp = requests.get(f"{BACKEND_URL}/history", timeout=6)
             if resp.status_code == 200:
-                st.session_state['dashboard_history'] = resp.json()
+                return resp.json()
         except:
             pass
+        return []
+
+    # Auto-load on tab open
+    if 'dashboard_history' not in st.session_state:
+        st.session_state['dashboard_history'] = load_dashboard_data()
 
     col_ref, _ = st.columns([1, 3])
     with col_ref:
         if st.button("🔄 Refresh Data"):
             with st.spinner("Refreshing..."):
-                try:
-                    resp = requests.get(f"{BACKEND_URL}/history", timeout=10)
-                    if resp.status_code == 200:
-                        st.session_state['dashboard_history'] = resp.json()
-                    else:
-                        st.error("Failed to refresh.")
-                except Exception as e:
-                    st.error(f"Backend not responding: {e}")
+                st.session_state['dashboard_history'] = load_dashboard_data()
 
     history = st.session_state.get('dashboard_history', [])
     total = len(history)

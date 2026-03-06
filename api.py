@@ -17,13 +17,14 @@ encoder_path = "bert_label_encoder.sav"
 model = None
 tokenizer = None
 reverse_mapping = {0: "Low", 1: "Moderate", 2: "High"}
+model_load_error = None
 
 # In-memory history store (resets on restart — good enough for demo)
 prediction_history: List[dict] = []
 
 @app.on_event("startup")
 def load_assets():
-    global model, tokenizer, reverse_mapping
+    global model, tokenizer, reverse_mapping, model_load_error
     try:
         if os.path.exists(model_dir):
             print(f"Loading model from {model_dir}...")
@@ -33,12 +34,14 @@ def load_assets():
             tokenizer = AutoTokenizer.from_pretrained(model_dir)
             print("Model loaded successfully.")
         else:
-            print(f"Warning: {model_dir} not found. Predictions will be unavailable.")
+            model_load_error = f"Model directory '{model_dir}' not found."
+            print(model_load_error)
 
         if os.path.exists(encoder_path):
             with open(encoder_path, "rb") as f:
                 reverse_mapping = pickle.load(f)
     except Exception as e:
+        model_load_error = str(e)
         print(f"Error loading model: {e}")
 
 
@@ -62,7 +65,7 @@ class HistoryRecord(BaseModel):
 @app.post("/predict", response_model=PredictResponse)
 def predict_anxiety(data: PredictRequest):
     if not model or not tokenizer:
-        # Return a random result for demo when model isn't loaded
+        # Demo mode — model not loaded yet
         import random
         level = random.randint(0, 2)
         tips_map = {
@@ -70,6 +73,12 @@ def predict_anxiety(data: PredictRequest):
             1: "1. Take deep breaths.\n2. Break study into chunks.\n3. Talk to a friend.",
             2: "1. Reach out to a counselor.\n2. Practice mindfulness.\n3. Remember: one step at a time."
         }
+        # Save to history even in demo mode
+        prediction_history.append({
+            "id": len(prediction_history) + 1,
+            "timestamp": datetime.utcnow().isoformat(),
+            "anxiety_level": level
+        })
         return PredictResponse(status="demo", anxiety_level=level, tips=tips_map[level])
 
     if not data.text.strip():
@@ -115,7 +124,7 @@ def get_history():
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "model_loaded": model is not None}
+    return {"status": "ok", "model_loaded": model is not None, "error": model_load_error}
 
 
 if __name__ == "__main__":
