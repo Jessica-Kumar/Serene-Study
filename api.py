@@ -4,114 +4,121 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import pickle
 import os
-import firebase_admin
-from firebase_admin import credentials, firestore
-import firebase_config as fb  # Import existing config or just use directly 
+from datetime import datetime
+from typing import List
 
-app = FastAPI(title="Exam Anxiety API", description="Backend Inference for Anxiety Detection")
+app = FastAPI(title="Serene Study API", description="Exam Anxiety Detection Backend")
 
-# Load model and tokenizers globally at startup
+# ---- Config ----
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model_dir = "bert_anxiety_model"
 encoder_path = "bert_label_encoder.sav"
 
 model = None
 tokenizer = None
-reverse_mapping = {}
+reverse_mapping = {0: "Low", 1: "Moderate", 2: "High"}
+
+# In-memory history store (resets on restart — good enough for demo)
+prediction_history: List[dict] = []
 
 @app.on_event("startup")
 def load_assets():
     global model, tokenizer, reverse_mapping
     try:
-        # If model doesn't exist yet, we can handle it gracefully for dev
         if os.path.exists(model_dir):
+            print(f"Loading model from {model_dir}...")
             model = AutoModelForSequenceClassification.from_pretrained(model_dir)
             model.to(device)
             model.eval()
             tokenizer = AutoTokenizer.from_pretrained(model_dir)
+            print("Model loaded successfully.")
         else:
-            print(f"Warning: {model_dir} not found. Please train the model first.")
-            
+            print(f"Warning: {model_dir} not found. Predictions will be unavailable.")
+
         if os.path.exists(encoder_path):
             with open(encoder_path, "rb") as f:
                 reverse_mapping = pickle.load(f)
-        else:
-            # Fallback if not trained yet
-            reverse_mapping = {0: "Low", 1: "Moderate", 2: "High"}
-            
     except Exception as e:
-        print(f"Error loading system: {e}")
+        print(f"Error loading model: {e}")
 
-class RequestData(BaseModel):
-    student_text: str
-    mbti: str
+
+# ---- Schemas ----
+class PredictRequest(BaseModel):
+    text: str
+    mbti_type: str = "Unknown"
 
 class PredictResponse(BaseModel):
-    anxiety_level: str
-    mbti_context: str
+    status: str
+    anxiety_level: int
+    tips: str
 
+class HistoryRecord(BaseModel):
+    id: int
+    timestamp: str
+    anxiety_level: int
+
+
+# ---- Endpoints ----
 @app.post("/predict", response_model=PredictResponse)
-def predict_anxiety(data: RequestData):
+def predict_anxiety(data: PredictRequest):
     if not model or not tokenizer:
-        raise HTTPException(status_code=503, detail="Model is not loaded or trained yet.")
-    
-    if not data.student_text.strip():
-        # Empty text defaults to Low
-        return PredictResponse(anxiety_level="Low", mbti_context=data.mbti)
-    
-    inputs = tokenizer(data.student_text, return_tensors="pt", truncation=True, padding=True, max_length=128)
+        # Return a random result for demo when model isn't loaded
+        import random
+        level = random.randint(0, 2)
+        tips_map = {
+            0: "1. You're doing great!\n2. Keep your routine.\n3. Get enough sleep.",
+            1: "1. Take deep breaths.\n2. Break study into chunks.\n3. Talk to a friend.",
+            2: "1. Reach out to a counselor.\n2. Practice mindfulness.\n3. Remember: one step at a time."
+        }
+        return PredictResponse(status="demo", anxiety_level=level, tips=tips_map[level])
+
+    if not data.text.strip():
+        return PredictResponse(status="success", anxiety_level=0, tips="1. You seem calm!\n2. Keep it up.")
+
+    inputs = tokenizer(
+        data.text, return_tensors="pt",
+        truncation=True, padding=True, max_length=128
+    )
     inputs = {k: v.to(device) for k, v in inputs.items()}
-    
+
     with torch.no_grad():
         outputs = model(**inputs)
-        logits = outputs.logits
-        predicted_class_id = logits.argmax().item()
-    
-    predicted_label = reverse_mapping.get(predicted_class_id, "Low")
-    
-    return PredictResponse(anxiety_level=predicted_label, mbti_context=data.mbti)
+        predicted_class_id = int(outputs.logits.argmax().item())
 
-@app.get("/stats")
-def get_stats():
-    """Aggregates anonymized stats for the Institutional Dashboard"""
-    # Assuming the results are saved in fb.db.collection('exam_results')
-    try:
-        if not hasattr(fb, 'db') or fb.db is None:
-            return {"error": "Firebase DB not initialized", "stats": {}}
-            
-        users_ref = fb.db.collection(fb.COLLECTION_NAME)
-        docs = users_ref.stream()
-        
-        distribution = {"Low": 0, "Moderate": 0, "High": 0}
-        mbti_distribution = {}
-        total = 0
-        
-        for doc in docs:
-            d = doc.to_dict()
-            level = d.get('anxiety_level')
-            mbti_type = d.get('mbti', 'Unknown')
-            
-            if level in distribution:
-                distribution[level] += 1
-            total += 1
-            
-            mbti_distribution[mbti_type] = mbti_distribution.get(mbti_type, 0) + 1
-            
-        return {
-            "total_assessments": total,
-            "anxiety_distribution": distribution,
-            "mbti_distribution": mbti_distribution
-        }
-    except Exception as e:
-        print(f"Error fetching stats: {e}")
-        # Return fallback mock stats if firebase isn't perfectly set up locally
-        return {
-            "total_assessments": 100,
-            "anxiety_distribution": {"Low": 50, "Moderate": 30, "High": 20},
-            "mbti_distribution": {"INTJ-A": 15, "ESFP-T": 10, "INFP-T": 25, "ESTJ-A": 50}
-        }
+    level_label = reverse_mapping.get(predicted_class_id, "Low")
+
+    tips_map = {
+        "Low":      "1. You're managing well!\n2. Keep your routine.\n3. Stay hydrated and sleep well.",
+        "Moderate": "1. Take a 5-minute break every hour.\n2. Break tasks into smaller parts.\n3. Talk to someone you trust.",
+        "High":     "1. Please speak to a counselor.\n2. Practice box breathing: inhale 4s, hold 4s, exhale 4s.\n3. You are not alone — reach out."
+    }
+
+    record = {
+        "id": len(prediction_history) + 1,
+        "timestamp": datetime.utcnow().isoformat(),
+        "anxiety_level": predicted_class_id
+    }
+    prediction_history.append(record)
+
+    return PredictResponse(
+        status="success",
+        anxiety_level=predicted_class_id,
+        tips=tips_map.get(level_label, "")
+    )
+
+
+@app.get("/history")
+def get_history():
+    """Returns all past predictions (anonymized, in-memory)."""
+    return prediction_history
+
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model_loaded": model is not None}
+
 
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.environ.get("PORT", 8000))
+    port = int(os.environ.get("PORT", 7860))
     uvicorn.run(app, host="0.0.0.0", port=port)
