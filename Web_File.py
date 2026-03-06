@@ -275,7 +275,7 @@ with tab1:
             if user_q:
                 with st.spinner("Thinking..."):
                     answer = ai_agent.chat_response(user_q, st.session_state['anxiety_level'], st.session_state.get('mbti', 'Unknown'))
-                    st.markdown(f"<div style='background:#F0F7F4;padding:1rem;border-radius:10px;'><b>AI:</b> {answer}</div>", unsafe_allow_html=True)
+                    st.markdown(f"<div style='background:#F0F7F4;padding:1rem;border-radius:10px;'><b>Jessica:</b> {answer}</div>", unsafe_allow_html=True)
 
 
 # -------------------------------------------------------------------------------------
