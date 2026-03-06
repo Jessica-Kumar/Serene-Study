@@ -82,6 +82,14 @@ try:
 except:
     api_key = st.text_input("Enter Google Gemini API Key", type="password")
 
+# -------------------- BACKEND URL --------------------
+# On Streamlit Cloud, set BACKEND_URL in secrets to your HF Space URL
+# e.g. https://jessica-kumar-serene-study-api.hf.space
+try:
+    BACKEND_URL = st.secrets["BACKEND_URL"].rstrip("/")
+except:
+    BACKEND_URL = "http://localhost:8000"
+
 # -------------------- SIDEBAR --------------------
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/leaf.png", width=60)
@@ -177,7 +185,7 @@ with tab1:
             with st.spinner("🤖 Reading your reflections via BERT model..."):
                 try:
                     response = requests.post(
-                        "http://localhost:8000/predict",
+                        f"{BACKEND_URL}/predict",
                         json={"text": student_text, "mbti_type": st.session_state['mbti']},
                         timeout=15
                     )
@@ -280,7 +288,7 @@ with tab2:
     # Auto-load on tab open
     if 'dashboard_history' not in st.session_state:
         try:
-            resp = requests.get("http://localhost:8000/history", timeout=6)
+            resp = requests.get(f"{BACKEND_URL}/history", timeout=6)
             if resp.status_code == 200:
                 st.session_state['dashboard_history'] = resp.json()
         except:
@@ -291,7 +299,7 @@ with tab2:
         if st.button("🔄 Refresh Data"):
             with st.spinner("Refreshing..."):
                 try:
-                    resp = requests.get("http://localhost:8000/history", timeout=10)
+                    resp = requests.get(f"{BACKEND_URL}/history", timeout=10)
                     if resp.status_code == 200:
                         st.session_state['dashboard_history'] = resp.json()
                     else:
